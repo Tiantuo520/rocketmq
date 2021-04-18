@@ -143,6 +143,7 @@ public class NamesrvStartup {
             System.exit(-3);
         }
 
+        // todo JVM钩子函数：在JVM进程关闭前会执行此函数，我们可以利用JVM钩子函数来优雅的释放线程池、连接池等相关资源
         Runtime.getRuntime().addShutdownHook(new ShutdownHookThread(log, new Callable<Void>() {
             @Override
             public Void call() throws Exception {
