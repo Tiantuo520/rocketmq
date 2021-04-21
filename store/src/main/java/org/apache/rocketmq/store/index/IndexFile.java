@@ -27,6 +27,28 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.MappedFile;
 
+/**
+ * 索引查询流程：
+ * key-->计算hash值
+ * -->hash值对500万取余算出对应的slot序号-->根据40+(n-1)*4(公式1)算出该slot在文件中的位置
+ * -->读取slot值，也就是index序号
+ * -->根据40+5000000*4+(s-1)*20(公式2)算出该index在文件中的位置
+ * -->读取该index
+ * -->将key的hash值以及传入的时间范围与index的keyHash值以及timeDiff值进行比对
+ * -->不满足则根据index中的preIndexNo找到上一个index，继续上一步
+ * -->满足则根据index中的phyOffset拿到commitLog中的消息
+ *
+ * 索引构建流程：
+ * 拿到消息的msgId
+ * -->hash值计算
+ * -->对500万取余计算对应的slot序号
+ * -->根据40+(n-1)*4算出该slot的文件位置
+ * -->读取slot值，也就是index序号
+ * -->追加写入一条Index数据，keyHash、phyOffset、timeDiff不用多说，preIndexNo我们说了是前一个index的序号，也就是slot的当前值，如果没有值，说明该slot下没有index
+ * -->更新slot值为插入的index的序号(更新前存的是上一个Index的序号或者空，更新后存的是新插入的Index的序号)
+ * -->更新IndexHeader中的endTimestamp、endPhyOffset、indexCount、hashSlotCount(这一项可能不会更新)
+ * 如果消息设置了一个或多个key属性，则重复上面的过程，构建索引
+ */
 public class IndexFile {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static int hashSlotSize = 4;

@@ -1593,15 +1593,24 @@ public class DefaultMessageStore implements MessageStore {
     class CleanCommitLogService {
 
         private final static int MAX_MANUAL_DELETE_FILE_TIMES = 20;
+        /**
+         * 默认为0.90如果磁盘分区使用率超过改阈值，将设置磁盘不可写，此时会拒绝新消息的写入
+         */
         private final double diskSpaceWarningLevelRatio =
             Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceWarningLevelRatio", "0.90"));
 
+        /**
+         * 默认为0.85如果磁盘分区使用超过改阈值，建议立即执行删除过期文件清除，但不会拒绝新消息的写入
+         */
         private final double diskSpaceCleanForciblyRatio =
             Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceCleanForciblyRatio", "0.85"));
         private long lastRedeleteTimestamp = 0;
 
         private volatile int manualDeleteFileSeveralTimes = 0;
 
+        /**
+         * 表示是否需要立即执行清除过期文件操作
+         */
         private volatile boolean cleanImmediately = false;
 
         public void excuteDeleteFilesManualy() {
@@ -1621,12 +1630,19 @@ public class DefaultMessageStore implements MessageStore {
 
         private void deleteExpiredFiles() {
             int deleteCount = 0;
+            // 文件保留时间，也就是最后一次更新时间到现在，如果过了该时间，，则认为是过期文件，可以被删除
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
+            // 删除物理文件的间隔，因为在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间。
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
+            // 在清除过期文件时，如果该文件本其他线程所占用（引用次数大于0.比如读取消息），此时会组织此次删除，同时在第一次试图删除该文件时记录当前时间戳，
+            // destroyMapedFileIntervalForcibly 表示第一次拒绝删除之后能保留的最大时间，在此时间内，同样可以被拒绝删除，超过时间后，会将引用次数设置为负数，文件将被强制删除
             int destroyMapedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
+            // 是否为指定删除文件时间点，默认凌晨4点
             boolean timeup = this.isTimeToDelete();
+            // 磁盘空间是否充足
             boolean spacefull = this.isSpaceToDelete();
+            // 是否人工触发删除
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
 
             if (timeup || spacefull || manualDelete) {
@@ -1686,6 +1702,7 @@ public class DefaultMessageStore implements MessageStore {
             cleanImmediately = false;
 
             {
+                // 当前commitlog 目录所在的磁盘分区的磁盘使用率，通过File#getTotalSpace()获取文件所在磁盘的分区的总容量，通过File#getFreeSpace()获取文件所在磁盘分区的剩余容量
                 double physicRatio = UtilAll.getDiskPartitionSpaceUsedPercent(getStorePathPhysic());
                 if (physicRatio > diskSpaceWarningLevelRatio) {
                     boolean diskok = DefaultMessageStore.this.runningFlags.getAndMakeDiskFull();
